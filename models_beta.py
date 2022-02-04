@@ -1,0 +1,105 @@
+import torch
+import torch.nn as nn
+
+class Encoder(nn.Module):
+    def __init__(self):
+        super(Encoder,self).__init__()
+        self.conv1=nn.Conv2d(1,64,5,padding=2,stride=2)   #in_channels=3
+        self.bn1=nn.BatchNorm2d(64,momentum=0.9)
+        self.conv2=nn.Conv2d(64,128,5,padding=2,stride=2)
+        self.bn2=nn.BatchNorm2d(128,momentum=0.9)
+        self.conv3=nn.Conv2d(128,256,5,padding=2,stride=2)
+        self.bn3=nn.BatchNorm2d(256,momentum=0.9)
+        self.relu=nn.LeakyReLU(0.2)
+        self.fc1=nn.Linear(256*8*8,2048)
+        self.bn4=nn.BatchNorm1d(2048,momentum=0.9)
+        self.fc_mean=nn.Linear(2048,128)
+        self.fc_logvar=nn.Linear(2048,128)   #latent dim=128
+    
+    def reparameterize(self, mu, logvar):
+        '''
+        compute z = mu + std * epsilon
+        '''
+        if self.training:
+            # do this only while training
+            # compute the standard deviation from logvar
+            std = torch.exp(0.5 * logvar)
+            # sample epsilon from a normal distribution with mean 0 and
+            # variance 1
+            eps = torch.randn_like(std)
+            return eps.mul(std).add_(mu)
+        else:
+            return mu
+
+
+    def forward(self,x):
+        batch_size=x.size()[0]
+        out=self.relu(self.bn1(self.conv1(x)))
+        out=self.relu(self.bn2(self.conv2(out)))
+        out=self.relu(self.bn3(self.conv3(out)))
+        out=out.view(batch_size,-1)
+        out=self.relu(self.bn4(self.fc1(out)))
+        mean=self.fc_mean(out)
+        logvar=self.fc_logvar(out)
+
+        
+        z_sample = self.reparameterize(mean, logvar)
+
+        
+        return mean,logvar, z_sample
+
+
+class Generator(nn.Module):
+    def __init__(self):
+        super(Generator,self).__init__()
+        self.fc1=nn.Linear(128,8*8*256)
+        self.bn1=nn.BatchNorm1d(8*8*256,momentum=0.9)
+        self.relu=nn.LeakyReLU(0.2)
+        self.deconv1=nn.ConvTranspose2d(256,256,6, stride=2, padding=2)
+        self.bn2=nn.BatchNorm2d(256,momentum=0.9)
+        self.deconv2=nn.ConvTranspose2d(256,128,6, stride=2, padding=2)
+        self.bn3=nn.BatchNorm2d(128,momentum=0.9)
+        self.deconv3=nn.ConvTranspose2d(128,32,6, stride=2, padding=2)
+        self.bn4=nn.BatchNorm2d(32,momentum=0.9)
+        self.deconv4=nn.ConvTranspose2d(32,1,5, stride=1, padding=2)
+        self.tanh=nn.Tanh()
+
+    def forward(self,x):
+        batch_size=x.size()[0]
+        x=self.relu(self.bn1(self.fc1(x)))
+        x=x.view(-1,256,8,8)
+        x=self.relu(self.bn2(self.deconv1(x)))
+        x=self.relu(self.bn3(self.deconv2(x)))
+        x=self.relu(self.bn4(self.deconv3(x)))
+        x=self.tanh(self.deconv4(x))
+        return x
+
+
+
+class Discriminator(nn.Module):
+    def __init__(self):
+        super(Discriminator,self).__init__()
+        self.conv1=nn.Conv2d(1,32,5,padding=2,stride=1)
+        self.relu=nn.LeakyReLU(0.2)
+        self.conv2=nn.Conv2d(32,128,5,padding=2,stride=2)
+        self.bn1=nn.BatchNorm2d(128,momentum=0.9)
+        self.conv3=nn.Conv2d(128,256,5,padding=2,stride=2)
+        self.bn2=nn.BatchNorm2d(256,momentum=0.9)
+        self.conv4=nn.Conv2d(256,256,5,padding=2,stride=2)
+        self.bn3=nn.BatchNorm2d(256,momentum=0.9)
+        self.fc1=nn.Linear(8*8*256,512)
+        self.bn4=nn.BatchNorm1d(512,momentum=0.9)
+        self.fc2=nn.Linear(512,1)
+        self.sigmoid=nn.Sigmoid()
+
+    def forward(self,x):
+        batch_size=x.size()[0]
+        x=self.relu(self.conv1(x))
+        x=self.relu(self.bn1(self.conv2(x)))
+        x=self.relu(self.bn2(self.conv3(x)))
+        x=self.relu(self.bn3(self.conv4(x)))
+        x=x.view(-1,256*8*8)
+        x1=x;
+        x=self.relu(self.bn4(self.fc1(x)))
+        x=self.sigmoid(self.fc2(x))
+        return x, x1
